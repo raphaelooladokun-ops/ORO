@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+networth/networth.db
+networth/.venv/
+.DS_Store
+.pytest_cache/
