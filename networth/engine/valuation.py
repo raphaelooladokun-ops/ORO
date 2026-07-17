@@ -31,6 +31,14 @@ currencies differ (a no-op when they match):
     valuation_adjustment   | (unused)                 | native += amount, or
                             |                          | units += units if the
                             |                          | target account is a holding
+    opening_balance         | native -= amount (bridged)| native += amount, or
+                            | (equity contra account)  | units += units if the
+                            |                          | target account is a holding
+
+`opening_balance` always books its contra to the singleton "Opening Balance
+Equity" account (engine/opening_balance.py), which carries
+`class_ = AccountClass.equity` and is therefore excluded from
+net_worth_daily's asset/liability sums below.
 
 Historical FX/price lookups always go through the stored `fx_rates` /
 `prices` history (forward/back-filled across gaps), not the
@@ -134,6 +142,12 @@ def _build_events(txns_df: pd.DataFrame, accounts_df: pd.DataFrame, fx_wide: pd.
                 add(target_id, d, units_delta=units)
             else:
                 add(target_id, d, native_delta=amt)
+        elif ttype == "opening_balance":
+            add(from_id, d, native_delta=-conv(from_id))
+            if to_id is not None and is_holding_map.get(to_id):
+                add(to_id, d, units_delta=units or 0.0)
+            else:
+                add(to_id, d, native_delta=conv(to_id))
 
     return events
 

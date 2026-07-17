@@ -23,7 +23,12 @@ if adf.empty:
 opts = account_options(engine, active_only=True)
 opts_with_none = {"(external / none)": None, **opts}
 
-txn_type = st.selectbox("Type", [t.value for t in TxnType])
+txn_type = st.selectbox(
+    "Type",
+    [t.value for t in TxnType if t != TxnType.opening_balance],
+    help="Opening balances are set from the Accounts page when creating an account, "
+    "so they always book correctly to the Opening Balance Equity contra account.",
+)
 date = st.date_input("Date", value=dt.date.today())
 
 col1, col2 = st.columns(2)

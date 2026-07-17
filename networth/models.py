@@ -17,6 +17,10 @@ metadata = sa.MetaData()
 class AccountClass(str, enum.Enum):
     asset = "asset"
     liability = "liability"
+    # Contra-equity accounts (currently just "Opening Balance Equity"). Never
+    # summed into total_assets/total_liabilities in net_worth_daily -- being
+    # neither "asset" nor "liability" is what excludes them.
+    equity = "equity"
 
 
 class AccountType(str, enum.Enum):
@@ -30,6 +34,7 @@ class AccountType(str, enum.Enum):
     loan = "loan"
     credit_card = "credit_card"
     payable = "payable"
+    equity = "equity"
     other = "other"
 
 
@@ -43,6 +48,7 @@ class TxnType(str, enum.Enum):
     drawdown = "drawdown"
     valuation_adjustment = "valuation_adjustment"
     dividend = "dividend"
+    opening_balance = "opening_balance"
 
 
 class PriceSource(str, enum.Enum):

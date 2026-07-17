@@ -10,6 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from engine.opening_balance import record_opening_balance
 from models import accounts, AccountClass, AccountType, valuation_snapshots
 from ui_common import get_engine, accounts_df, fmt_usd
 
@@ -40,20 +41,45 @@ with st.expander("Add account", expanded=False):
             )
         opening_date = st.date_input("Opening date", value=dt.date.today())
         notes = st.text_area("Notes", value="")
+
+        st.divider()
+        st.caption(
+            "Opening balance (optional). If set, this is posted as an `opening_balance` "
+            "ledger transaction contra to the Opening Balance Equity account -- it never "
+            "writes a balance directly onto the account."
+        )
+        has_opening_balance = st.checkbox("Set an opening balance for this account")
+        col7, col8, col9 = st.columns(3)
+        with col7:
+            opening_balance_amount = st.number_input(
+                "Opening balance (monetary accounts, in native currency)",
+                value=0.0, step=1.0, format="%.2f",
+            )
+        with col8:
+            opening_units = st.number_input(
+                "Opening units (holding accounts)", value=0.0, step=1.0, format="%.4f",
+            )
+        with col9:
+            opening_unit_cost = st.number_input(
+                "Opening unit cost (holding accounts, optional)",
+                value=0.0, step=0.01, format="%.4f",
+            )
+
         submitted = st.form_submit_button("Create account")
 
         if submitted:
             if not name.strip():
                 st.error("Name is required.")
             else:
+                native_ccy = currency.strip().upper()
                 with engine.begin() as conn:
-                    conn.execute(
+                    result = conn.execute(
                         accounts.insert().values(
                             name=name.strip(),
                             class_=class_,
                             type=type_,
                             is_holding=is_holding,
-                            native_currency=currency.strip().upper(),
+                            native_currency=native_ccy,
                             price_ticker=price_ticker.strip() or None,
                             interest_rate=interest_rate or None,
                             opening_date=opening_date,
@@ -61,7 +87,25 @@ with st.expander("Add account", expanded=False):
                             is_active=True,
                         )
                     )
-                st.success(f"Created account '{name}'.")
+                    new_account_id = result.inserted_primary_key[0]
+
+                if has_opening_balance:
+                    if is_holding:
+                        record_opening_balance(
+                            engine, new_account_id, opening_date, native_ccy, is_holding=True,
+                            units=opening_units, unit_price=opening_unit_cost or None,
+                        )
+                    else:
+                        record_opening_balance(
+                            engine, new_account_id, opening_date, native_ccy, is_holding=False,
+                            amount_native=opening_balance_amount,
+                        )
+
+                st.success(
+                    f"Created account '{name}'"
+                    + (" with opening balance." if has_opening_balance else ".")
+                    + " Re-run a valuation refresh (Prices & FX page) to update net worth."
+                )
                 st.rerun()
 
 st.subheader("All accounts")

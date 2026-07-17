@@ -4,6 +4,7 @@ import pytest
 import sqlalchemy as sa
 
 import db
+from engine.opening_balance import record_opening_balance
 from engine.valuation import rebuild_all
 from models import accounts, transactions, fx_rates, prices
 
@@ -130,3 +131,45 @@ def test_net_worth_daily_subtracts_liabilities(engine):
     assert row["total_assets_usd"] == pytest.approx(500.0)
     assert row["total_liabilities_usd"] == pytest.approx(500.0)
     assert row["net_worth_usd"] == pytest.approx(0.0)  # drawdown nets to zero: cash up, debt up equally
+
+
+def test_opening_balance_monetary_seeds_balance_via_equity_contra(engine):
+    cash = add_account(engine, name="Bank USD", class_="asset", type="bank", native_currency="USD", opening_date=dt.date(2024, 1, 1))
+    record_opening_balance(engine, cash, dt.date(2024, 1, 1), "USD", is_holding=False, amount_native=2500.0)
+
+    snap_df, nw_df = rebuild_all(engine, as_of=dt.date(2024, 1, 5))
+
+    cash_row = snap_df[(snap_df.account_id == cash) & (snap_df.date == dt.date(2024, 1, 5))].iloc[0]
+    assert cash_row["native_balance"] == pytest.approx(2500.0)
+    assert cash_row["usd_value"] == pytest.approx(2500.0)
+
+    # The equity contra account absorbed the opposite leg...
+    with engine.connect() as conn:
+        equity_row = conn.execute(sa.text("SELECT id, class_ FROM accounts WHERE name = 'Opening Balance Equity'")).fetchone()
+    assert equity_row is not None
+    equity_id = equity_row[0]
+    equity_snap = snap_df[(snap_df.account_id == equity_id) & (snap_df.date == dt.date(2024, 1, 5))].iloc[0]
+    assert equity_snap["native_balance"] == pytest.approx(-2500.0)
+
+    # ...but is excluded from net worth entirely (not asset, not liability).
+    nw_row = nw_df[nw_df.date == dt.date(2024, 1, 5)].iloc[0]
+    assert nw_row["total_assets_usd"] == pytest.approx(2500.0)
+    assert nw_row["net_worth_usd"] == pytest.approx(2500.0)
+
+
+def test_opening_balance_holding_seeds_units_and_optional_cost(engine):
+    stock = add_account(
+        engine, name="MTN", class_="asset", type="equity_holding", native_currency="NGN",
+        is_holding=True, price_ticker="MTNN", opening_date=dt.date(2024, 1, 1),
+    )
+    add_fx(engine, "NGN", dt.date(2024, 1, 1), 0.001)
+    add_price(engine, "MTNN", dt.date(2024, 1, 1), 220.0)
+
+    record_opening_balance(
+        engine, stock, dt.date(2024, 1, 1), "NGN", is_holding=True, units=150.0, unit_price=200.0,
+    )
+
+    snap_df, _ = rebuild_all(engine, as_of=dt.date(2024, 1, 5))
+    stock_row = snap_df[(snap_df.account_id == stock) & (snap_df.date == dt.date(2024, 1, 5))].iloc[0]
+    assert stock_row["units"] == pytest.approx(150.0)
+    assert stock_row["usd_value"] == pytest.approx(150.0 * 220.0 * 0.001)  # valued at the *stored price*, not opening cost

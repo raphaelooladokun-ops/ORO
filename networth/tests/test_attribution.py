@@ -5,6 +5,7 @@ import sqlalchemy as sa
 
 import db
 from engine.attribution import compute_bridge
+from engine.opening_balance import record_opening_balance
 from engine.valuation import rebuild_all
 from models import accounts, transactions, fx_rates, prices
 
@@ -94,3 +95,26 @@ def test_bridge_pure_fx_move_isolated(engine):
     assert bridge["market_pnl"] == pytest.approx(0.0, abs=1e-6)
     assert bridge["fx_pnl"] == pytest.approx(-10.0, abs=1e-6)  # 100 USD -> 90 USD, on the deposited balance
     assert bridge["cash_flow"] == pytest.approx(100.0, abs=1e-6)  # the deposit itself
+
+
+def test_opening_balance_inside_window_excluded_from_the_three_buckets(engine):
+    # Account onboarded mid-period (opening_balance dated *inside* the bridge
+    # window) -- its starting value must not show up as cash flow/market/fx.
+    cash = add_account(engine, name="Bank USD", class_="asset", type="bank", native_currency="USD", opening_date=dt.date(2024, 1, 1))
+    record_opening_balance(engine, cash, dt.date(2024, 1, 10), "USD", is_holding=False, amount_native=1000.0)
+    # Genuine activity after onboarding, so cash_flow should reflect only this.
+    add_txn(engine, date=dt.date(2024, 1, 15), type="income", to_account_id=cash, amount_native=50.0, currency="USD", fx_rate_to_usd=1.0)
+
+    rebuild_all(engine, as_of=dt.date(2024, 1, 20))
+    bridge, table_df = compute_bridge(engine, dt.date(2024, 1, 1), dt.date(2024, 1, 20))
+
+    assert bridge["opening_balance_adj"] == pytest.approx(1000.0, abs=1e-6)
+    assert bridge["cash_flow"] == pytest.approx(50.0, abs=1e-6)  # not 1050 -- opening balance excluded
+    assert bridge["market_pnl"] == pytest.approx(0.0, abs=1e-6)
+    assert bridge["fx_pnl"] == pytest.approx(0.0, abs=1e-6)
+
+    # Reconciliation still holds with the extra bucket included.
+    total = bridge["cash_flow"] + bridge["market_pnl"] + bridge["fx_pnl"] + bridge["opening_balance_adj"]
+    assert total == pytest.approx(bridge["total_change"], abs=1e-6)
+    assert bridge["residual"] == pytest.approx(0.0, abs=1e-6)
+    assert table_df["opening_balance_adj"].sum() == pytest.approx(1000.0, abs=1e-6)

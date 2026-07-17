@@ -13,6 +13,9 @@ DB_URL = f"sqlite:///{DB_PATH}"
 
 BASE_CURRENCY = "USD"
 
+# Singleton contra account name for opening balances (see engine/opening_balance.py).
+OPENING_BALANCE_EQUITY_NAME = "Opening Balance Equity"
+
 # --- Anthropic (weekly narrative) ---
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5")
